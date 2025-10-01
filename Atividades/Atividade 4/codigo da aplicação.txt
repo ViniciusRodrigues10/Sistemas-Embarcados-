@@ -1,0 +1,223 @@
+#include <stdio.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "driver/ledc.h"
+#include "esp_err.h"
+
+#define DELAY_MS 15
+#define BUZZER_DELAY_MS 10
+
+#define LED1_GPIO 4
+#define LED2_GPIO 5
+#define LED3_GPIO 6
+#define LED4_GPIO 7
+#define BUZZER_GPIO 21
+
+#define LEDC_TIMER              LEDC_TIMER_0
+#define LEDC_MODE               LEDC_LOW_SPEED_MODE
+#define LEDC_RESOLUTION         LEDC_TIMER_13_BIT
+#define LEDC_FREQUENCY          1000  
+#define BUZZER_FREQUENCY       1000  
+
+#define LEDC_CHANNEL_LED1       LEDC_CHANNEL_0
+#define LEDC_CHANNEL_LED2       LEDC_CHANNEL_1
+#define LEDC_CHANNEL_LED3       LEDC_CHANNEL_2
+#define LEDC_CHANNEL_LED4       LEDC_CHANNEL_3
+#define LEDC_CHANNEL_BUZZER     LEDC_CHANNEL_4
+
+#define LEDC_DUTY_MAX           (8191)
+
+void configure_ledc(void) {
+    ledc_timer_config_t ledc_timer = {
+        .speed_mode       = LEDC_MODE,
+        .timer_num        = LEDC_TIMER,
+        .duty_resolution  = LEDC_RESOLUTION,
+        .freq_hz          = LEDC_FREQUENCY,
+        .clk_cfg          = LEDC_AUTO_CLK
+    };
+    ledc_timer_config(&ledc_timer);
+
+    ledc_channel_config_t ledc_channel[4] = {
+        {
+            .gpio_num       = LED1_GPIO,
+            .speed_mode     = LEDC_MODE,
+            .channel        = LEDC_CHANNEL_LED1,
+            .intr_type      = LEDC_INTR_DISABLE,
+            .timer_sel      = LEDC_TIMER,
+            .duty           = 0,
+            .hpoint         = 0
+        },
+        {
+            .gpio_num       = LED2_GPIO,
+            .speed_mode     = LEDC_MODE,
+            .channel        = LEDC_CHANNEL_LED2,
+            .intr_type      = LEDC_INTR_DISABLE,
+            .timer_sel      = LEDC_TIMER,
+            .duty           = 0,
+            .hpoint         = 0
+        },
+        {
+            .gpio_num       = LED3_GPIO,
+            .speed_mode     = LEDC_MODE,
+            .channel        = LEDC_CHANNEL_LED3,
+            .intr_type      = LEDC_INTR_DISABLE,
+            .timer_sel      = LEDC_TIMER,
+            .duty           = 0,
+            .hpoint         = 0
+        },
+        {
+            .gpio_num       = LED4_GPIO,
+            .speed_mode     = LEDC_MODE,
+            .channel        = LEDC_CHANNEL_LED4,
+            .intr_type      = LEDC_INTR_DISABLE,
+            .timer_sel      = LEDC_TIMER,
+            .duty           = 0,
+            .hpoint         = 0
+        }
+    };
+
+    for (int i = 0; i < 4; i++) {
+        ledc_channel_config(&ledc_channel[i]);
+    }
+
+    ledc_timer_config_t buzzer_timer = {
+        .speed_mode       = LEDC_MODE,
+        .timer_num        = LEDC_TIMER_1,
+        .duty_resolution  = LEDC_RESOLUTION,
+        .freq_hz          = BUZZER_FREQUENCY,
+        .clk_cfg          = LEDC_AUTO_CLK
+    };
+    ledc_timer_config(&buzzer_timer);
+
+    ledc_channel_config_t buzzer_channel = {
+        .gpio_num       = BUZZER_GPIO,
+        .speed_mode     = LEDC_MODE,
+        .channel        = LEDC_CHANNEL_BUZZER,
+        .intr_type      = LEDC_INTR_DISABLE,
+        .timer_sel      = LEDC_TIMER_1,
+        .duty           = 0,
+        .hpoint         = 0
+    };
+    ledc_channel_config(&buzzer_channel);
+}
+
+void set_led_duty(ledc_channel_t channel, uint32_t duty) {
+    if (duty > LEDC_DUTY_MAX) duty = LEDC_DUTY_MAX;
+    ledc_set_duty(LEDC_MODE, channel, duty);
+    ledc_update_duty(LEDC_MODE, channel);
+}
+
+void set_buzzer_frequency(uint32_t freq_hz) {
+    ledc_set_freq(LEDC_MODE, LEDC_TIMER_1, freq_hz);
+}
+
+void set_buzzer_duty(uint32_t duty) {
+    if (duty > LEDC_DUTY_MAX) duty = LEDC_DUTY_MAX;
+    ledc_set_duty(LEDC_MODE, LEDC_CHANNEL_BUZZER, duty);
+    ledc_update_duty(LEDC_MODE, LEDC_CHANNEL_BUZZER);
+}
+
+void turn_off_all_leds(void) {
+    set_led_duty(LEDC_CHANNEL_LED1, 0);
+    set_led_duty(LEDC_CHANNEL_LED2, 0);
+    set_led_duty(LEDC_CHANNEL_LED3, 0);
+    set_led_duty(LEDC_CHANNEL_LED4, 0);
+    
+    vTaskDelay(50 / portTICK_PERIOD_MS);
+}
+
+void fade_sync_leds(void) {
+    turn_off_all_leds();
+    
+    for (int duty = 0; duty <= LEDC_DUTY_MAX; duty += 100) {
+        set_led_duty(LEDC_CHANNEL_LED1, duty);
+        set_led_duty(LEDC_CHANNEL_LED2, duty);
+        set_led_duty(LEDC_CHANNEL_LED3, duty);
+        set_led_duty(LEDC_CHANNEL_LED4, duty);
+        vTaskDelay(DELAY_MS / portTICK_PERIOD_MS);
+    }
+    
+    for (int duty = LEDC_DUTY_MAX; duty >= 0; duty -= 100) {
+        set_led_duty(LEDC_CHANNEL_LED1, duty);
+        set_led_duty(LEDC_CHANNEL_LED2, duty);
+        set_led_duty(LEDC_CHANNEL_LED3, duty);
+        set_led_duty(LEDC_CHANNEL_LED4, duty);
+        vTaskDelay(DELAY_MS / portTICK_PERIOD_MS);
+    }
+    turn_off_all_leds();
+}
+
+void fade_sequential_leds(void) {
+    ledc_channel_t leds[] = {
+        LEDC_CHANNEL_LED1, 
+        LEDC_CHANNEL_LED2, 
+        LEDC_CHANNEL_LED3, 
+        LEDC_CHANNEL_LED4
+    };
+    turn_off_all_leds();
+    
+    for (int i = 0; i < 4; i++) {
+        // Fade in
+        for (int duty = 0; duty <= LEDC_DUTY_MAX; duty += 100) {
+            set_led_duty(leds[i], duty);
+            vTaskDelay(DELAY_MS / portTICK_PERIOD_MS);
+        }
+        vTaskDelay(200 / portTICK_PERIOD_MS);
+        
+        for (int duty = LEDC_DUTY_MAX; duty >= 0; duty -= 100) {
+            set_led_duty(leds[i], duty);
+            vTaskDelay(DELAY_MS / portTICK_PERIOD_MS);
+        }
+        set_led_duty(leds[i], 0);
+    }
+    vTaskDelay(500 / portTICK_PERIOD_MS);
+    
+    for (int i = 2; i >= 0; i--) {
+        for (int duty = 0; duty <= LEDC_DUTY_MAX; duty += 100) {
+            set_led_duty(leds[i], duty);
+            vTaskDelay(DELAY_MS / portTICK_PERIOD_MS);
+        }
+        vTaskDelay(200 / portTICK_PERIOD_MS);
+        
+        for (int duty = LEDC_DUTY_MAX; duty >= 0; duty -= 100) {
+            set_led_duty(leds[i], duty);
+            vTaskDelay(DELAY_MS / portTICK_PERIOD_MS);
+        }
+        set_led_duty(leds[i], 0);
+    }
+    turn_off_all_leds();
+}
+
+void test_buzzer(void) {
+    set_buzzer_duty(0);
+    set_buzzer_duty(LEDC_DUTY_MAX / 2);
+    
+    for (int freq = 500; freq <= 2000; freq += 10) {
+        set_buzzer_frequency(freq);
+        vTaskDelay(BUZZER_DELAY_MS / portTICK_PERIOD_MS);
+    }
+    
+    for (int freq = 2000; freq >= 500; freq -= 10) {
+        set_buzzer_frequency(freq);
+        vTaskDelay(BUZZER_DELAY_MS / portTICK_PERIOD_MS);
+    }
+    
+    set_buzzer_duty(0);
+}
+
+void app_main(void) {
+    configure_ledc();
+    turn_off_all_leds();
+    set_buzzer_duty(0);
+    set_buzzer_frequency(1000);
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
+    
+    while(1) {
+        fade_sync_leds();
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+        fade_sequential_leds();
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+        test_buzzer();
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+    }
+}
